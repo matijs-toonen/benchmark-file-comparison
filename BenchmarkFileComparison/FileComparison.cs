@@ -1,7 +1,9 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Security.Cryptography;
+using System.Threading.Tasks;
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Jobs;
 
@@ -29,6 +31,96 @@ namespace BenchmarkFileComparison
             {
                 if (firstHash[i] != secondHash[i])
                     return false;
+            }
+
+            return true;
+        }
+
+        [Benchmark]
+        [ArgumentsSource(nameof(Files))]
+        public bool FilesAreEqual_ArraySegment(FileInfo original, FileInfo compare)
+        {
+            var fileBytes1 = File.ReadAllBytes(original.FullName);
+            var fileBytes2 = File.ReadAllBytes(compare.FullName);
+
+            var offset = 0;
+            while (offset < (int)original.Length - offset)
+            {
+                var count = BYTES_TO_READ + offset;
+
+                if (count > original.Length - offset)
+                {
+                    count = (int)original.Length - offset;
+                }
+
+                var segment1 = new ArraySegment<byte>(fileBytes1, offset, count);
+                var segment2 = new ArraySegment<byte>(fileBytes2, offset, count);
+
+                if (!segment1.SequenceEqual(segment2))
+                {
+                    return false;
+                }
+
+                offset += BYTES_TO_READ;
+            }
+
+            return true;
+        }
+
+        [Benchmark]
+        [ArgumentsSource(nameof(Files))]
+        public async Task<bool> Async_FilesAreEqual_ArraySegment(FileInfo original, FileInfo compare)
+        {
+            
+            var fileBytes1 = File.ReadAllBytes(original.FullName);
+            var fileBytes2 = File.ReadAllBytes(compare.FullName);
+
+            var amountOfChunks = 10;
+
+            var chunksSize = (int)Math.Ceiling(fileBytes1.Length / (float)amountOfChunks);
+
+
+            var fileLength = (int)original.Length;
+
+            var chunks = new List<(int, int)>(amountOfChunks);
+            var offset = 0;
+            var count = chunksSize;
+            for (int i = 0; i < amountOfChunks; i++)
+            {
+                if (offset + count > fileLength)
+                {
+                    count = fileLength - offset;
+                }
+
+                chunks.Add((offset, count));
+                offset += count;
+            }
+            
+            Task<bool> compareFiles(int offset, int count)
+            {
+                var segment1 = new ArraySegment<byte>(fileBytes1, offset, count);
+                var segment2 = new ArraySegment<byte>(fileBytes2, offset, count);
+                if (!segment1.SequenceEqual(segment2))
+                {
+                    return Task.FromResult(false);
+                }
+
+                return Task.FromResult(true);
+            }
+
+            var tasks = Enumerable.Range(0, amountOfChunks).Select(i => {
+                var chunk = chunks[i];
+                return compareFiles(chunk.Item1, chunk.Item2);
+            });
+
+            
+            foreach(var task in tasks.AsParallel())
+            {
+                var result = await task;
+                if (!result)
+                {
+                    return false;
+                }
             }
 
             return true;
@@ -68,7 +160,7 @@ namespace BenchmarkFileComparison
             if (string.Equals(original.FullName, compare.FullName, StringComparison.OrdinalIgnoreCase))
                 return true;
 
-            var iterations = (int) Math.Ceiling((double) original.Length / BYTES_TO_READ);
+            var iterations = (int)Math.Ceiling((double)original.Length / BYTES_TO_READ);
 
             using var fs1 = original.OpenRead();
             using var fs2 = compare.OpenRead();
