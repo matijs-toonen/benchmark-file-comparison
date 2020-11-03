@@ -9,8 +9,8 @@ using BenchmarkDotNet.Jobs;
 
 namespace BenchmarkFileComparison
 {
-    [SimpleJob(RuntimeMoniker.NetCoreApp50)]
-    [IterationCount(10)]
+    [SimpleJob(RuntimeMoniker.NetCoreApp50, 1, 1, 1)]
+    //[IterationCount(10)]
     [MinColumn, MaxColumn, MeanColumn]
     public class FileComparison
     {
@@ -149,6 +149,105 @@ namespace BenchmarkFileComparison
 
         // ReSharper disable once InconsistentNaming
         const int BYTES_TO_READ = sizeof(Int64);
+
+
+        [Benchmark]
+        [ArgumentsSource(nameof(Files))]
+        public bool FilesAreEqual_ByteChunked(FileInfo original, FileInfo compare)
+        {
+            if (original.Length != compare.Length)
+            {
+                return false;
+            }
+
+            if (string.Equals(original.FullName, compare.FullName, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            var iterations = (int)Math.Ceiling((double)original.Length / BYTES_TO_READ);
+
+            using var fs1 = new FileStream(original.FullName, FileMode.Open, FileAccess.Read, FileShare.Read, 4096, FileOptions.WriteThrough);
+            using var fs2 = new FileStream(compare.FullName, FileMode.Open, FileAccess.Read, FileShare.Read, 4096, FileOptions.WriteThrough);
+
+            var one = new byte[BYTES_TO_READ];
+            var two = new byte[BYTES_TO_READ];
+
+            for (var i = 0; i < iterations; i++)
+            {
+                fs1.Read(one, 0, BYTES_TO_READ);
+                fs2.Read(two, 0, BYTES_TO_READ);
+
+                if (BitConverter.ToInt64(one, 0) != BitConverter.ToInt64(two, 0))
+                    return false;
+            }
+
+            return true;
+        }
+
+        [Benchmark]
+        [ArgumentsSource(nameof(Files))]
+        public bool FilesAreEqual_ByteChunkedStackAlloc(FileInfo original, FileInfo compare)
+        {
+            if (original.Length != compare.Length)
+            {
+                return false;
+            }
+
+            if (string.Equals(original.FullName, compare.FullName, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            var iterations = (int)Math.Ceiling((double)original.Length / BYTES_TO_READ);
+
+            using var fs1 = new FileStream(original.FullName, FileMode.Open, FileAccess.Read, FileShare.Read, 4096, FileOptions.WriteThrough);
+            using var fs2 = new FileStream(compare.FullName, FileMode.Open, FileAccess.Read, FileShare.Read, 4096, FileOptions.WriteThrough);
+
+            Span<byte> one = stackalloc byte[BYTES_TO_READ];
+            Span<byte> two = stackalloc byte[BYTES_TO_READ];
+
+            for (var i = 0; i < iterations; i++)
+            {
+                fs1.Read(one);
+                fs2.Read(two);
+
+                if (BitConverter.ToInt64(one) != BitConverter.ToInt64(two))
+                    return false;
+            }
+
+            return true;
+        }
+
+        [Benchmark]
+        [ArgumentsSource(nameof(Files))]
+        public bool FilesAreEqual_ByteBatchStackAlloc(FileInfo original, FileInfo compare)
+        {
+            if (original.Length != compare.Length)
+                return false;
+
+            if (string.Equals(original.FullName, compare.FullName, StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            var iterations = (int)Math.Ceiling((double)original.Length / BYTES_TO_READ);
+
+            using var fs1 = original.OpenRead();
+            using var fs2 = compare.OpenRead();
+
+            Span<byte> one = stackalloc byte[BYTES_TO_READ];
+            Span<byte> two = stackalloc byte[BYTES_TO_READ];
+
+            for (var i = 0; i < iterations; i++)
+            {
+                fs1.Read(one);
+                fs2.Read(two);
+
+                if (BitConverter.ToInt64(one) != BitConverter.ToInt64(two))
+                    return false;
+            }
+
+            return true;
+        }
 
         [Benchmark]
         [ArgumentsSource(nameof(Files))]
