@@ -219,6 +219,112 @@ namespace BenchmarkFileComparison
             return true;
         }
 
+        const int val = 8192;
+
+        [Benchmark]
+        [ArgumentsSource(nameof(Files))]
+        public bool FilesAreEqual_ByteFileStreamOptions(FileInfo original, FileInfo compare)
+        {
+            if (original.Length != compare.Length)
+            {
+                return false;
+            }
+
+            if (string.Equals(original.FullName, compare.FullName, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            var iterations = (int)Math.Ceiling((double)original.Length / val);
+
+            using var fs1 = new FileStream(original.FullName, FileMode.Open, FileAccess.Read, FileShare.Read, val, FileOptions.SequentialScan);
+            using var fs2 = new FileStream(compare.FullName, FileMode.Open, FileAccess.Read, FileShare.Read, val, FileOptions.SequentialScan);
+
+            Span<byte> one = stackalloc byte[val];
+            Span<byte> two = stackalloc byte[val];
+
+            for (var i = 0; i < iterations; i++)
+            {
+                fs1.Read(one);
+                fs2.Read(two);
+
+                if (BitConverter.ToInt64(one) != BitConverter.ToInt64(two))
+                    return false;
+            }
+
+            return true;
+        }
+
+        [Benchmark]
+        [ArgumentsSource(nameof(Files))]
+        public async Task<bool> ByteFileStreamOptions(FileInfo original, FileInfo compare)
+        {
+            if (original.Length != compare.Length)
+            {
+                return false;
+            }
+
+            if (string.Equals(original.FullName, compare.FullName, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            var iterations = (int)Math.Ceiling((double)original.Length / val);
+
+            using var fs1 = new FileStream(original.FullName, FileMode.Open, FileAccess.Read, FileShare.Read, val, true);
+            using var fs2 = new FileStream(compare.FullName, FileMode.Open, FileAccess.Read, FileShare.Read, val, true);
+
+            var one = new Memory<byte>(new byte[val]);
+            var two = new Memory<byte>(new byte[val]);
+
+            for (var i = 0; i < iterations; i++)
+            {
+                var task1 = fs1.ReadAsync(one).AsTask();
+                var task2 = fs2.ReadAsync(two).AsTask();
+
+                await Task.WhenAll(task1, task2);
+
+                if (BitConverter.ToInt64(one.Span) != BitConverter.ToInt64(two.Span))
+                    return false;
+            }
+
+            return true;
+        }
+
+        [Benchmark]
+        [ArgumentsSource(nameof(Files))]
+        public bool FilesAreEqual_ByteMinFileStreamOptions(FileInfo original, FileInfo compare)
+        {
+            if (original.Length != compare.Length)
+            {
+                return false;
+            }
+
+            if (string.Equals(original.FullName, compare.FullName, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            var iterations = (int)Math.Ceiling((double)original.Length / val);
+
+            using var fs1 = new FileStream(original.FullName, FileMode.Open, FileAccess.Read, FileShare.Read, val, FileOptions.None);
+            using var fs2 = new FileStream(compare.FullName, FileMode.Open, FileAccess.Read, FileShare.Read, val, FileOptions.None);
+
+            Span<byte> one = stackalloc byte[val];
+            Span<byte> two = stackalloc byte[val];
+
+            for (var i = 0; i < iterations; i++)
+            {
+                fs1.Read(one);
+                fs2.Read(two);
+
+                if (BitConverter.ToInt64(one) != BitConverter.ToInt64(two))
+                    return false;
+            }
+
+            return true;
+        }
+
         [Benchmark]
         [ArgumentsSource(nameof(Files))]
         public bool FilesAreEqual_ByteBatchStackAlloc(FileInfo original, FileInfo compare)
@@ -249,7 +355,7 @@ namespace BenchmarkFileComparison
             return true;
         }
 
-        [Benchmark]
+        [Benchmark(Baseline = true)]
         [ArgumentsSource(nameof(Files))]
         public bool FilesAreEqual_ByteBatch(FileInfo original, FileInfo compare)
         {
@@ -292,7 +398,7 @@ namespace BenchmarkFileComparison
                 yield return new object[] {new FileInfo(origFile), new FileInfo(compFile)};
 
                 // Equal contents
-                yield return new object[] {new FileInfo(origFile), new FileInfo(origFile)};
+                //yield return new object[] {new FileInfo(origFile), new FileInfo(origFile)};
             }
         }
     }
