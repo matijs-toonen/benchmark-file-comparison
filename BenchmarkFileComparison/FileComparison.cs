@@ -219,7 +219,8 @@ namespace BenchmarkFileComparison
             return true;
         }
 
-        const int val = 8192;
+        const int MemoryBufferSize = 4096;
+        const int FileStreamBufferSize = 8192;
 
         [Benchmark]
         [ArgumentsSource(nameof(Files))]
@@ -235,13 +236,13 @@ namespace BenchmarkFileComparison
                 return true;
             }
 
-            var iterations = (int)Math.Ceiling((double)original.Length / val);
+            var iterations = (int)Math.Ceiling((double)original.Length / MemoryBufferSize);
 
-            using var fs1 = new FileStream(original.FullName, FileMode.Open, FileAccess.Read, FileShare.Read, val, FileOptions.SequentialScan);
-            using var fs2 = new FileStream(compare.FullName, FileMode.Open, FileAccess.Read, FileShare.Read, val, FileOptions.SequentialScan);
+            using var fs1 = new FileStream(original.FullName, FileMode.Open, FileAccess.Read, FileShare.Read, MemoryBufferSize, FileOptions.SequentialScan);
+            using var fs2 = new FileStream(compare.FullName, FileMode.Open, FileAccess.Read, FileShare.Read, MemoryBufferSize, FileOptions.SequentialScan);
 
-            Span<byte> one = stackalloc byte[val];
-            Span<byte> two = stackalloc byte[val];
+            Span<byte> one = stackalloc byte[MemoryBufferSize];
+            Span<byte> two = stackalloc byte[MemoryBufferSize];
 
             for (var i = 0; i < iterations; i++)
             {
@@ -257,7 +258,7 @@ namespace BenchmarkFileComparison
 
         [Benchmark]
         [ArgumentsSource(nameof(Files))]
-        public async Task<bool> ByteFileStreamOptions(FileInfo original, FileInfo compare)
+        public async Task<bool> AsyncFilesAreEqual__ByteFileStreamOptions(FileInfo original, FileInfo compare)
         {
             if (original.Length != compare.Length)
             {
@@ -269,13 +270,13 @@ namespace BenchmarkFileComparison
                 return true;
             }
 
-            var iterations = (int)Math.Ceiling((double)original.Length / val);
+            var iterations = (int)Math.Ceiling((double)original.Length / MemoryBufferSize);
 
-            using var fs1 = new FileStream(original.FullName, FileMode.Open, FileAccess.Read, FileShare.Read, val, true);
-            using var fs2 = new FileStream(compare.FullName, FileMode.Open, FileAccess.Read, FileShare.Read, val, true);
+            using var fs1 = new FileStream(original.FullName, FileMode.Open, FileAccess.Read, FileShare.Read, FileStreamBufferSize, true);
+            using var fs2 = new FileStream(compare.FullName, FileMode.Open, FileAccess.Read, FileShare.Read, FileStreamBufferSize, true);
 
-            var one = new Memory<byte>(new byte[val]);
-            var two = new Memory<byte>(new byte[val]);
+            var one = new Memory<byte>(new byte[MemoryBufferSize]);
+            var two = new Memory<byte>(new byte[MemoryBufferSize]);
 
             for (var i = 0; i < iterations; i++)
             {
@@ -305,13 +306,13 @@ namespace BenchmarkFileComparison
                 return true;
             }
 
-            var iterations = (int)Math.Ceiling((double)original.Length / val);
+            var iterations = (int)Math.Ceiling((double)original.Length / MemoryBufferSize);
 
-            using var fs1 = new FileStream(original.FullName, FileMode.Open, FileAccess.Read, FileShare.Read, val, FileOptions.None);
-            using var fs2 = new FileStream(compare.FullName, FileMode.Open, FileAccess.Read, FileShare.Read, val, FileOptions.None);
+            using var fs1 = new FileStream(original.FullName, FileMode.Open, FileAccess.Read, FileShare.Read, FileStreamBufferSize, FileOptions.None);
+            using var fs2 = new FileStream(compare.FullName, FileMode.Open, FileAccess.Read, FileShare.Read, FileStreamBufferSize, FileOptions.None);
 
-            Span<byte> one = stackalloc byte[val];
-            Span<byte> two = stackalloc byte[val];
+            Span<byte> one = stackalloc byte[MemoryBufferSize];
+            Span<byte> two = stackalloc byte[MemoryBufferSize];
 
             for (var i = 0; i < iterations; i++)
             {
