@@ -364,6 +364,42 @@ namespace BenchmarkFileComparison
             return true;
         }
 
+        [Benchmark]
+        [ArgumentsSource(nameof(Files))]
+        public bool FilesAreEqual_SequenceSeq(FileInfo original, FileInfo compare)
+        {
+            if (original.Length != compare.Length)
+            {
+                return false;
+            }
+
+            if (string.Equals(original.FullName, compare.FullName, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            var iterations = (int)Math.Ceiling((double)original.Length / MemoryBufferSize);
+
+            using var fs1 = new FileStream(original.FullName, FileMode.Open, FileAccess.Read, FileShare.Read, FileStreamBufferSize, FileOptions.SequentialScan);
+            using var fs2 = new FileStream(compare.FullName, FileMode.Open, FileAccess.Read, FileShare.Read, FileStreamBufferSize, FileOptions.SequentialScan);
+
+            Span<byte> one = stackalloc byte[MemoryBufferSize];
+            Span<byte> two = stackalloc byte[MemoryBufferSize];
+
+            for (var i = 0; i < iterations; i++)
+            {
+                fs1.Read(one);
+                fs2.Read(two);
+
+                if (!one.SequenceEqual(two))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
         [DllImport("msvcrt.dll", CallingConvention = CallingConvention.Cdecl)]
         static extern int memcmp(byte[] b1, byte[] b2, long count);
 
@@ -385,6 +421,42 @@ namespace BenchmarkFileComparison
 
             using var fs1 = new FileStream(original.FullName, FileMode.Open, FileAccess.Read, FileShare.Read, FileStreamBufferSize, FileOptions.None);
             using var fs2 = new FileStream(compare.FullName, FileMode.Open, FileAccess.Read, FileShare.Read, FileStreamBufferSize, FileOptions.None);
+
+            var one = new byte[FileStreamBufferSize];
+            var two = new byte[FileStreamBufferSize];
+
+            for (var i = 0; i < iterations; i++)
+            {
+                fs1.Read(one);
+                fs2.Read(two);
+
+                if (memcmp(one, two, one.Length) != 0)
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        [Benchmark]
+        [ArgumentsSource(nameof(Files))]
+        public bool FilesAreEqual_MemCmpSeq(FileInfo original, FileInfo compare)
+        {
+            if (original.Length != compare.Length)
+            {
+                return false;
+            }
+
+            if (string.Equals(original.FullName, compare.FullName, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            var iterations = (int)Math.Ceiling((double)original.Length / FileStreamBufferSize);
+
+            using var fs1 = new FileStream(original.FullName, FileMode.Open, FileAccess.Read, FileShare.Read, FileStreamBufferSize, FileOptions.SequentialScan);
+            using var fs2 = new FileStream(compare.FullName, FileMode.Open, FileAccess.Read, FileShare.Read, FileStreamBufferSize, FileOptions.SequentialScan);
 
             var one = new byte[FileStreamBufferSize];
             var two = new byte[FileStreamBufferSize];
@@ -448,6 +520,45 @@ namespace BenchmarkFileComparison
 
         [Benchmark]
         [ArgumentsSource(nameof(Files))]
+        public unsafe bool FilesAreEqual_PointerMemCmpSeq(FileInfo original, FileInfo compare)
+        {
+            if (original.Length != compare.Length)
+            {
+                return false;
+            }
+
+            if (string.Equals(original.FullName, compare.FullName, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            var iterations = (int)Math.Ceiling((double)original.Length / MemoryBufferSize);
+
+            using var fs1 = new FileStream(original.FullName, FileMode.Open, FileAccess.Read, FileShare.Read, FileStreamBufferSize, FileOptions.SequentialScan);
+            using var fs2 = new FileStream(compare.FullName, FileMode.Open, FileAccess.Read, FileShare.Read, FileStreamBufferSize, FileOptions.SequentialScan);
+
+            Span<byte> one = stackalloc byte[MemoryBufferSize];
+            Span<byte> two = stackalloc byte[MemoryBufferSize];
+
+            for (var i = 0; i < iterations; i++)
+            {
+                fs1.Read(one);
+                fs2.Read(two);
+
+                fixed (byte* onePointer = one, twoPointer = two)
+                {
+                    if (memcmp(onePointer, twoPointer, MemoryBufferSize) != 0)
+                    {
+                        return false;
+                    }
+                }
+            }
+
+            return true;
+        }
+
+        [Benchmark]
+        [ArgumentsSource(nameof(Files))]
         public unsafe bool FilesAreEqual_PointerMemCmpOneFixed(FileInfo original, FileInfo compare)
         {
             if (original.Length != compare.Length)
@@ -475,6 +586,45 @@ namespace BenchmarkFileComparison
                     fs1.Read(one);
                     fs2.Read(two);
                 
+                    if (memcmp(onePointer, twoPointer, MemoryBufferSize) != 0)
+                    {
+                        return false;
+                    }
+                }
+            }
+
+            return true;
+        }
+
+        [Benchmark]
+        [ArgumentsSource(nameof(Files))]
+        public unsafe bool FilesAreEqual_PointerMemCmpOneFixedSeq(FileInfo original, FileInfo compare)
+        {
+            if (original.Length != compare.Length)
+            {
+                return false;
+            }
+
+            if (string.Equals(original.FullName, compare.FullName, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            var iterations = (int)Math.Ceiling((double)original.Length / MemoryBufferSize);
+
+            using var fs1 = new FileStream(original.FullName, FileMode.Open, FileAccess.Read, FileShare.Read, FileStreamBufferSize, FileOptions.SequentialScan);
+            using var fs2 = new FileStream(compare.FullName, FileMode.Open, FileAccess.Read, FileShare.Read, FileStreamBufferSize, FileOptions.SequentialScan);
+
+            Span<byte> one = stackalloc byte[MemoryBufferSize];
+            Span<byte> two = stackalloc byte[MemoryBufferSize];
+
+            fixed (byte* onePointer = one, twoPointer = two)
+            {
+                for (var i = 0; i < iterations; i++)
+                {
+                    fs1.Read(one);
+                    fs2.Read(two);
+
                     if (memcmp(onePointer, twoPointer, MemoryBufferSize) != 0)
                     {
                         return false;
