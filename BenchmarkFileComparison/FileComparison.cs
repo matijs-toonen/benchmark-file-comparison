@@ -8,11 +8,14 @@ using System.Security.Cryptography;
 using System.Threading.Tasks;
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Jobs;
+using System.Runtime.Intrinsics.X86;
+using System.Numerics;
 
 namespace BenchmarkFileComparison
 {
-    [SimpleJob(RuntimeMoniker.NetCoreApp50)]
-    [IterationCount(10)]
+    //[SimpleJob(RuntimeMoniker.NetCoreApp50)]
+    [SimpleJob(RuntimeMoniker.NetCoreApp50, 1, 1, 1)]
+    //[IterationCount(10)]
     [MinColumn, MaxColumn, MeanColumn]
     public class FileComparison
     {
@@ -400,6 +403,148 @@ namespace BenchmarkFileComparison
             return true;
         }
 
+        [Benchmark]
+        [ArgumentsSource(nameof(Files))]
+        public unsafe bool FilesAreEqual_Vector(FileInfo original, FileInfo compare)
+        {
+            if (original.Length != compare.Length)
+            {
+                return false;
+            }
+
+            if (string.Equals(original.FullName, compare.FullName, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            var iterations = (int)Math.Ceiling((double)original.Length / MemoryBufferSize);
+
+            using var fs1 = new FileStream(original.FullName, FileMode.Open, FileAccess.Read, FileShare.Read, FileStreamBufferSize, FileOptions.None);
+            using var fs2 = new FileStream(compare.FullName, FileMode.Open, FileAccess.Read, FileShare.Read, FileStreamBufferSize, FileOptions.None);
+
+            Span<byte> one = stackalloc byte[MemoryBufferSize];
+            Span<byte> two = stackalloc byte[MemoryBufferSize];
+
+            // chunks of 32 bits
+            // MemoryBufferSize / 32 = 128,
+            // this will compute nicely and not need any checks to secure that every bit has been checked
+            int vectorSize = Vector<byte>.Count;
+
+            for (var j = 0; j < iterations; j++)
+            {
+                fs1.Read(one);
+                fs2.Read(two);
+                
+                int i = 0;
+                for (; i <= one.Length - vectorSize; i += vectorSize)
+                {
+                    var va = new Vector<byte>(one.Slice(i, vectorSize));
+                    var vb = new Vector<byte>(two.Slice(i, vectorSize));
+                    if (!Vector.EqualsAll(va, vb))
+                    {
+                        return false;
+                    }
+                }
+            }
+
+            return true;
+        }
+
+        [Benchmark]
+        [ArgumentsSource(nameof(Files))]
+        public unsafe bool FilesAreEqual_VectorFull(FileInfo original, FileInfo compare)
+        {
+            if (original.Length != compare.Length)
+            {
+                return false;
+            }
+
+            if (string.Equals(original.FullName, compare.FullName, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            var iterations = (int)Math.Ceiling((double)original.Length / MemoryBufferSize);
+
+            using var fs1 = new FileStream(original.FullName, FileMode.Open, FileAccess.Read, FileShare.Read, FileStreamBufferSize, FileOptions.None);
+            using var fs2 = new FileStream(compare.FullName, FileMode.Open, FileAccess.Read, FileShare.Read, FileStreamBufferSize, FileOptions.None);
+
+            Span<byte> one = stackalloc byte[MemoryBufferSize];
+            Span<byte> two = stackalloc byte[MemoryBufferSize];
+
+            for (var j = 0; j < iterations; j++)
+            {
+                fs1.Read(one);
+                fs2.Read(two);
+
+                var va = new Vector<byte>(one);
+                var vb = new Vector<byte>(two);
+                if (!Vector.EqualsAll(va, vb))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+
+        [Benchmark]
+        [ArgumentsSource(nameof(Files))]
+        public unsafe bool FilesAreEqual_Intrinsic(FileInfo original, FileInfo compare)
+        {
+            if (!Avx2.IsSupported)
+            {
+                throw new NotSupportedException("CPU does not support Avx2 intrinsics");
+            }
+
+            if (original.Length != compare.Length)
+            {
+                return false;
+            }
+
+            if (string.Equals(original.FullName, compare.FullName, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            var iterations = (int)Math.Ceiling((double)original.Length / MemoryBufferSize);
+
+            using var fs1 = new FileStream(original.FullName, FileMode.Open, FileAccess.Read, FileShare.Read, FileStreamBufferSize, FileOptions.None);
+            using var fs2 = new FileStream(compare.FullName, FileMode.Open, FileAccess.Read, FileShare.Read, FileStreamBufferSize, FileOptions.None);
+
+            Span<byte> one = stackalloc byte[MemoryBufferSize];
+            Span<byte> two = stackalloc byte[MemoryBufferSize];
+
+            // chunks of 32 bits
+            // MemoryBufferSize / 32 = 128,
+            // this will compute nicely and not need any checks to secure that every bit has been checked
+            const int vectorSize = 256 / 8;
+            const int equalsMask = -1;
+
+            for (var j = 0; j < iterations; j++)
+            {
+                fs1.Read(one);
+                fs2.Read(two);
+
+                int i = 0;
+                fixed (byte* ptrA = one, ptrB = two)
+                {
+                    for (; i <= one.Length - vectorSize; i += vectorSize)
+                    {
+                        var va = Avx2.LoadVector256(ptrA + i);
+                        var vb = Avx2.LoadVector256(ptrB + i);
+                        var areEqual = Avx2.CompareEqual(va, vb);
+                        if (Avx2.MoveMask(areEqual) != equalsMask)
+                        {
+                            return false;
+                        }
+                    }
+                }
+            }
+
+            return true;
+        }
+
         [DllImport("msvcrt.dll", CallingConvention = CallingConvention.Cdecl)]
         static extern int memcmp(byte[] b1, byte[] b2, long count);
 
@@ -437,6 +582,83 @@ namespace BenchmarkFileComparison
             }
 
             return true;
+        }
+
+        // Copyright (c) 2008-2013 Hafthor Stefansson
+        // Distributed under the MIT/X11 software license
+        // Ref: http://www.opensource.org/licenses/mit-license.php.
+        [Benchmark]
+        [ArgumentsSource(nameof(Files))]
+        public unsafe bool UnsafeCompare(FileInfo original, FileInfo compare)
+        {
+            if (original.Length != compare.Length)
+            {
+                return false;
+            }
+
+            if (string.Equals(original.FullName, compare.FullName, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            var iterations = (int)Math.Ceiling((double)original.Length / MemoryBufferSize);
+
+            using var fs1 = new FileStream(original.FullName, FileMode.Open, FileAccess.Read, FileShare.Read, FileStreamBufferSize, FileOptions.None);
+            using var fs2 = new FileStream(compare.FullName, FileMode.Open, FileAccess.Read, FileShare.Read, FileStreamBufferSize, FileOptions.None);
+
+            Span<byte> one = stackalloc byte[MemoryBufferSize];
+            Span<byte> two = stackalloc byte[MemoryBufferSize];
+
+            for (var i = 0; i < iterations; i++)
+            {
+                fs1.Read(one);
+                fs2.Read(two);
+
+                fixed (byte* p1 = one, p2 = two)
+                {
+                    byte* x1 = p1, x2 = p2;
+                    int l = one.Length;
+                    for (int j = 0; j < l / 8; j++, x1 += 8, x2 += 8)
+                    {
+
+                        if (*((long*)x1) != *((long*)x2))
+                        {
+                            return false;
+                        }
+
+                        if ((l & 4) != 0)
+                        {
+                            if (*((int*)x1) != *((int*)x2))
+                            {
+                                return false;
+                            }
+
+                            x1 += 4; x2 += 4;
+                        }
+
+                        if ((l & 2) != 0) 
+                        {
+                            if (*((short*)x1) != *((short*)x2))
+                            {
+                                return false;
+                            }
+
+                            x1 += 2; x2 += 2; 
+                        }
+
+                        if ((l & 1) != 0)
+                        {
+                            if (*((byte*)x1) != *((byte*)x2))
+                            {
+                                return false;
+                            }
+                        }
+                    }
+                }
+            }
+
+            return true;
+
         }
 
         [Benchmark]
@@ -703,12 +925,13 @@ namespace BenchmarkFileComparison
             {
                 var origFile = Path.Combine(currentDir, "Files", $"{size}.txt");
                 var compFile = Path.Combine(currentDir, "Files", $"{size}_.txt");
+                var equalDiff = Path.Combine(currentDir, "Files", $"{size} - Copy.txt");
 
                 // Different contents
                 yield return new object[] {new FileInfo(origFile), new FileInfo(compFile)};
 
                 // Equal contents
-                //yield return new object[] {new FileInfo(origFile), new FileInfo(origFile)};
+                yield return new object[] { new FileInfo(origFile), new FileInfo(equalDiff) };
             }
         }
     }
